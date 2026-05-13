@@ -22,10 +22,12 @@ The **llm-router-sdk** defines the interface contract for building external prov
 ## Installation
 
 ```bash
-go get github.com/TheSlopMachine/llm-router-sdk@latest
+go get github.com/TheSlopMachine/llm-router-sdk@main
 ```
 
 **Requirements**: Go 1.25 or later
+
+For bleeding-edge installs, `@main` resolves the current tip of the `main` branch. Go will still pin the resolved result as a pseudo-version in your `go.mod`, so rerun `go get ...@main` when you want to move to newer commits.
 
 ---
 
@@ -65,7 +67,7 @@ var _ sdk.Adapter = (*Adapter)(nil)
 Then add your adapter to llm-router's `adapters.conf`:
 
 ```
-github.com/yourorg/llm-router-adapter-myprovider latest
+github.com/yourorg/llm-router-adapter-myprovider main
 ```
 
 See [examples/minimal](examples/minimal) for a complete working example.
