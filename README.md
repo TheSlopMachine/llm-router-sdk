@@ -58,8 +58,8 @@ func (a *Adapter) CompleteStream(ctx context.Context, cred *sdk.Credential, req 
 func (a *Adapter) NeedsRefresh(cred *sdk.Credential) bool { return false }
 func (a *Adapter) RefreshCredential(ctx context.Context, cred *sdk.Credential) (*sdk.Credential, error) { return nil, sdk.ErrNoRefreshNeeded }
 func (a *Adapter) GetModelInfos(ctx context.Context, cred *sdk.Credential, providerQualifier string) ([]sdk.ModelInfo, error) { /* ... */ }
-func (a *Adapter) GetAuthFlow() sdk.AuthFlowHandler { return nil }
-func (a *Adapter) GetDefaultProviders() []sdk.ProviderInfo { return nil }
+func (a *Adapter) GetAuthFlow() sdk.AuthFlowHandler { return &MyProviderAuthFlow{} }
+func (a *Adapter) GetDefaultProviders() []sdk.ProviderInfo { return []sdk.ProviderInfo{{Name: "My Provider"}} }
 
 var _ sdk.Adapter = (*Adapter)(nil)
 ```
@@ -70,7 +70,7 @@ Then add your adapter to llm-router's `adapters.conf`:
 github.com/yourorg/llm-router-adapter-myprovider main
 ```
 
-See [examples/minimal](examples/minimal) for a complete working example.
+Start from [llm-router-adapter-template](https://github.com/TheSlopMachine/llm-router-adapter-template) for the canonical scaffold, or see [examples/minimal](examples/minimal) for the smallest possible local example.
 
 ---
 
@@ -331,7 +331,7 @@ GetAuthFlow() AuthFlowHandler
 
 Returns an optional handler for automated provider-specific authentication. Return `nil` if your provider doesn't support automated authentication (users will need to manually enter credentials via JSON).
 
-Return an `AuthFlowHandler` implementation to enable the wizard-based credential acquisition flow in the dashboard.
+Most adapters should return an `AuthFlowHandler` implementation so the dashboard can guide users through API key, OAuth2, or multi-step authentication. Return `nil` only for intentionally manual-only providers.
 
 #### GetDefaultProviders
 
@@ -510,9 +510,13 @@ if resp.StatusCode == 401 {
 
 ## Examples
 
-### Minimal Adapter
+### Starter Template
 
-See [examples/minimal](examples/minimal) for a complete minimal adapter implementation (98 lines).
+Start with [llm-router-adapter-template](https://github.com/TheSlopMachine/llm-router-adapter-template) for the canonical standalone starter repository.
+
+### Minimal Local Example
+
+See [examples/minimal](examples/minimal) for a tiny local example that demonstrates the smallest compiling adapter shape.
 
 ### Reference Implementation
 
@@ -529,6 +533,7 @@ See [llm-router-adapter-demo](https://github.com/TheSlopMachine/llm-router-adapt
 ## Resources
 
 - **Main Router**: [github.com/TheSlopMachine/llm-router](https://github.com/TheSlopMachine/llm-router)
+- **Adapter Template**: [github.com/TheSlopMachine/llm-router-adapter-template](https://github.com/TheSlopMachine/llm-router-adapter-template)
 - **Demo Adapter**: [github.com/TheSlopMachine/llm-router-adapter-demo](https://github.com/TheSlopMachine/llm-router-adapter-demo)
 - **Examples**: [examples/](examples/)
 

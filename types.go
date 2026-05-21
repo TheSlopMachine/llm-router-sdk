@@ -2,6 +2,7 @@
 package sdk
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -19,8 +20,9 @@ func (m ModelId) String() string { return string(m) }
 // Parse splits a ModelId into providerID and model name.
 // The providerID may be composite (e.g., "openai" or "openai:azure").
 // Examples:
-//   "openai/gpt-4o" -> ("openai", "gpt-4o")
-//   "openai:azure/gpt-4o" -> ("openai:azure", "gpt-4o")
+//
+//	"openai/gpt-4o" -> ("openai", "gpt-4o")
+//	"openai:azure/gpt-4o" -> ("openai:azure", "gpt-4o")
 func (m ModelId) Parse() (providerID, model string, err error) {
 	s := string(m)
 	idx := strings.Index(s, "/")
@@ -32,8 +34,9 @@ func (m ModelId) Parse() (providerID, model string, err error) {
 
 // ParseFull splits a ModelId into adapter type, qualifier, and model name.
 // Examples:
-//   "openai/gpt-4o" -> ("openai", "", "gpt-4o")
-//   "openai:azure/gpt-4o" -> ("openai", "azure", "gpt-4o")
+//
+//	"openai/gpt-4o" -> ("openai", "", "gpt-4o")
+//	"openai:azure/gpt-4o" -> ("openai", "azure", "gpt-4o")
 func (m ModelId) ParseFull() (adapterType, qualifier, model string, err error) {
 	providerID, model, err := m.Parse()
 	if err != nil {
@@ -69,16 +72,228 @@ type Credential struct {
 // OpenAI-compatible wire types
 // ─────────────────────────────────────────────
 
+type ChatMessageContentPart struct {
+	Type        string                   `json:"type,omitempty"`
+	Text        string                   `json:"text,omitempty"`
+	ToolUseID   string                   `json:"tool_use_id,omitempty"`
+	ID          string                   `json:"id,omitempty"`
+	Name        string                   `json:"name,omitempty"`
+	Input       json.RawMessage          `json:"input,omitempty"`
+	Content     []ChatMessageContentPart `json:"-"`
+	ContentText string                   `json:"-"`
+}
+
+func (p *ChatMessageContentPart) UnmarshalJSON(data []byte) error {
+	type rawPart struct {
+		Type      string          `json:"type,omitempty"`
+		Text      string          `json:"text,omitempty"`
+		ToolUseID string          `json:"tool_use_id,omitempty"`
+		ID        string          `json:"id,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Input     json.RawMessage `json:"input,omitempty"`
+		Content   json.RawMessage `json:"content,omitempty"`
+	}
+
+	var raw rawPart
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	p.Type = raw.Type
+	p.Text = raw.Text
+	p.ToolUseID = raw.ToolUseID
+	p.ID = raw.ID
+	p.Name = raw.Name
+	p.Input = raw.Input
+
+	rawContent := strings.TrimSpace(string(raw.Content))
+	switch {
+	case rawContent == "", rawContent == "null":
+	case strings.HasPrefix(rawContent, "\""):
+		if err := json.Unmarshal(raw.Content, &p.ContentText); err != nil {
+			return err
+		}
+	case strings.HasPrefix(rawContent, "["):
+		if err := json.Unmarshal(raw.Content, &p.Content); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p ChatMessageContentPart) MarshalJSON() ([]byte, error) {
+	type rawPart struct {
+		Type      string          `json:"type,omitempty"`
+		Text      string          `json:"text,omitempty"`
+		ToolUseID string          `json:"tool_use_id,omitempty"`
+		ID        string          `json:"id,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Input     json.RawMessage `json:"input,omitempty"`
+		Content   any             `json:"content,omitempty"`
+	}
+
+	out := rawPart{
+		Type:      p.Type,
+		Text:      p.Text,
+		ToolUseID: p.ToolUseID,
+		ID:        p.ID,
+		Name:      p.Name,
+		Input:     p.Input,
+	}
+	if len(p.Content) > 0 {
+		out.Content = p.Content
+	} else if p.ContentText != "" {
+		out.Content = p.ContentText
+	}
+	return json.Marshal(out)
+}
+
+func (p ChatMessageContentPart) TextContent() string {
+	if text := strings.TrimSpace(p.Text); text != "" {
+		return text
+	}
+	if text := strings.TrimSpace(p.ContentText); text != "" {
+		return text
+	}
+
+	parts := make([]string, 0, len(p.Content))
+	for _, child := range p.Content {
+		if text := strings.TrimSpace(child.TextContent()); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+type ChatToolFunction struct {
+	Name        string         `json:"name,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Arguments   string         `json:"arguments,omitempty"`
+}
+
+type ChatToolCall struct {
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function ChatToolFunction `json:"function"`
+}
+
+type ChatTool struct {
+	Type        string            `json:"type,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Parameters  map[string]any    `json:"parameters,omitempty"`
+	InputSchema map[string]any    `json:"input_schema,omitempty"`
+	Function    *ChatToolFunction `json:"function,omitempty"`
+}
+
 // ChatMessage is a single turn in a conversation.
 type ChatMessage struct {
-	Role    string `json:"role" example:"user" enums:"system,user,assistant"`
-	Content string `json:"content" example:"Hello, how are you?"`
+	Role         string                   `json:"role" example:"user" enums:"system,user,assistant,tool"`
+	Content      string                   `json:"-" example:"Hello, how are you?"`
+	ContentParts []ChatMessageContentPart `json:"-"`
+	ToolCalls    []ChatToolCall           `json:"tool_calls,omitempty"`
+	ToolCallID   string                   `json:"tool_call_id,omitempty"`
+}
+
+func (m *ChatMessage) UnmarshalJSON(data []byte) error {
+	type rawMessage struct {
+		Role       string          `json:"role"`
+		Content    json.RawMessage `json:"content"`
+		ToolCalls  []ChatToolCall  `json:"tool_calls,omitempty"`
+		ToolCallID string          `json:"tool_call_id,omitempty"`
+	}
+
+	var raw rawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	m.Role = raw.Role
+	m.ToolCalls = raw.ToolCalls
+	m.ToolCallID = raw.ToolCallID
+	m.Content = ""
+	m.ContentParts = nil
+
+	rawContent := strings.TrimSpace(string(raw.Content))
+	switch {
+	case rawContent == "", rawContent == "null":
+	case strings.HasPrefix(rawContent, "\""):
+		if err := json.Unmarshal(raw.Content, &m.Content); err != nil {
+			return err
+		}
+	case strings.HasPrefix(rawContent, "["):
+		if err := json.Unmarshal(raw.Content, &m.ContentParts); err != nil {
+			return err
+		}
+		m.Content = flattenContentParts(m.ContentParts)
+	default:
+		return fmt.Errorf("unsupported message content shape")
+	}
+
+	return nil
+}
+
+func (m ChatMessage) MarshalJSON() ([]byte, error) {
+	type rawMessage struct {
+		Role       string         `json:"role"`
+		Content    any            `json:"content"`
+		ToolCalls  []ChatToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string         `json:"tool_call_id,omitempty"`
+	}
+
+	content := any(m.Content)
+	if len(m.ContentParts) > 0 {
+		content = m.ContentParts
+	}
+
+	return json.Marshal(rawMessage{
+		Role:       m.Role,
+		Content:    content,
+		ToolCalls:  m.ToolCalls,
+		ToolCallID: m.ToolCallID,
+	})
+}
+
+func (m ChatMessage) TextContent() string {
+	parts := make([]string, 0, len(m.ToolCalls)+1)
+	if text := strings.TrimSpace(m.Content); text != "" {
+		parts = append(parts, text)
+	} else if len(m.ContentParts) > 0 {
+		if text := strings.TrimSpace(flattenContentParts(m.ContentParts)); text != "" {
+			parts = append(parts, text)
+		}
+	}
+
+	for _, toolCall := range m.ToolCalls {
+		if name := strings.TrimSpace(toolCall.Function.Name); name != "" {
+			parts = append(parts, name)
+		}
+		if args := strings.TrimSpace(toolCall.Function.Arguments); args != "" {
+			parts = append(parts, args)
+		}
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func flattenContentParts(parts []ChatMessageContentPart) string {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if text := strings.TrimSpace(part.TextContent()); text != "" {
+			texts = append(texts, text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 // ChatCompletionRequest is the incoming /v1/chat/completions body.
 type ChatCompletionRequest struct {
 	Model       ModelId       `json:"model" example:"openai/gpt-4o"`
 	Messages    []ChatMessage `json:"messages"`
+	Tools       []ChatTool    `json:"tools,omitempty"`
+	ToolChoice  any           `json:"tool_choice,omitempty"`
 	Stream      bool          `json:"stream,omitempty" example:"false"`
 	MaxTokens   int           `json:"max_tokens,omitempty" example:"1000"`
 	Temperature float64       `json:"temperature,omitempty" example:"0.7"`
