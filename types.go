@@ -171,6 +171,7 @@ type ChatToolFunction struct {
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
 	Arguments   string         `json:"arguments,omitempty"`
+	Strict      *bool          `json:"strict,omitempty"`
 }
 
 type ChatToolCall struct {
@@ -186,15 +187,18 @@ type ChatTool struct {
 	Parameters  map[string]any    `json:"parameters,omitempty"`
 	InputSchema map[string]any    `json:"input_schema,omitempty"`
 	Function    *ChatToolFunction `json:"function,omitempty"`
+	Strict      *bool             `json:"strict,omitempty"`
 }
 
 // ChatMessage is a single turn in a conversation.
 type ChatMessage struct {
-	Role         string                   `json:"role" example:"user" enums:"system,user,assistant,tool"`
+	Role         string                   `json:"role" example:"user" enums:"system,user,assistant,tool,developer"`
 	Content      string                   `json:"-" example:"Hello, how are you?"`
 	ContentParts []ChatMessageContentPart `json:"-"`
 	ToolCalls    []ChatToolCall           `json:"tool_calls,omitempty"`
 	ToolCallID   string                   `json:"tool_call_id,omitempty"`
+	Name         string                   `json:"name,omitempty"`
+	Refusal      *string                  `json:"refusal,omitempty"`
 }
 
 func (m *ChatMessage) UnmarshalJSON(data []byte) error {
@@ -203,6 +207,8 @@ func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 		Content    json.RawMessage `json:"content"`
 		ToolCalls  []ChatToolCall  `json:"tool_calls,omitempty"`
 		ToolCallID string          `json:"tool_call_id,omitempty"`
+		Name       string          `json:"name,omitempty"`
+		Refusal    *string         `json:"refusal,omitempty"`
 	}
 
 	var raw rawMessage
@@ -213,6 +219,8 @@ func (m *ChatMessage) UnmarshalJSON(data []byte) error {
 	m.Role = raw.Role
 	m.ToolCalls = raw.ToolCalls
 	m.ToolCallID = raw.ToolCallID
+	m.Name = raw.Name
+	m.Refusal = raw.Refusal
 	m.Content = ""
 	m.ContentParts = nil
 
@@ -241,6 +249,8 @@ func (m ChatMessage) MarshalJSON() ([]byte, error) {
 		Content    any            `json:"content"`
 		ToolCalls  []ChatToolCall `json:"tool_calls,omitempty"`
 		ToolCallID string         `json:"tool_call_id,omitempty"`
+		Name       string         `json:"name,omitempty"`
+		Refusal    *string        `json:"refusal,omitempty"`
 	}
 
 	content := any(m.Content)
@@ -253,6 +263,8 @@ func (m ChatMessage) MarshalJSON() ([]byte, error) {
 		Content:    content,
 		ToolCalls:  m.ToolCalls,
 		ToolCallID: m.ToolCallID,
+		Name:       m.Name,
+		Refusal:    m.Refusal,
 	})
 }
 
@@ -288,32 +300,55 @@ func flattenContentParts(parts []ChatMessageContentPart) string {
 	return strings.Join(texts, "\n")
 }
 
+// StreamOptions for streaming
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
+}
+
 // ChatCompletionRequest is the incoming /v1/chat/completions body.
 type ChatCompletionRequest struct {
-	Model       ModelId       `json:"model" example:"openai/gpt-4o"`
-	Messages    []ChatMessage `json:"messages"`
-	Tools       []ChatTool    `json:"tools,omitempty"`
-	ToolChoice  any           `json:"tool_choice,omitempty"`
-	Stream      bool          `json:"stream,omitempty" example:"false"`
-	MaxTokens   int           `json:"max_tokens,omitempty" example:"1000"`
-	Temperature float64       `json:"temperature,omitempty" example:"0.7"`
-	TopP        float64       `json:"top_p,omitempty" example:"1.0"`
+	Model               ModelId        `json:"model" example:"openai/gpt-4o"`
+	Messages            []ChatMessage  `json:"messages"`
+	Tools               []ChatTool     `json:"tools,omitempty"`
+	ToolChoice          any            `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool          `json:"parallel_tool_calls,omitempty"`
+	Stream              bool           `json:"stream,omitempty" example:"false"`
+	StreamOptions       *StreamOptions `json:"stream_options,omitempty"`
+	MaxTokens           int            `json:"max_tokens,omitempty" example:"1000"`
+	MaxCompletionTokens *int           `json:"max_completion_tokens,omitempty"`
+	Temperature         float64        `json:"temperature,omitempty" example:"0.7"`
+	TopP                float64        `json:"top_p,omitempty" example:"1.0"`
+	N                   *int           `json:"n,omitempty"`
+	Stop                any            `json:"stop,omitempty"`
+	Seed                *int64         `json:"seed,omitempty"`
+	FrequencyPenalty    *float64       `json:"frequency_penalty,omitempty"`
+	PresencePenalty     *float64       `json:"presence_penalty,omitempty"`
+	Logprobs            *bool          `json:"logprobs,omitempty"`
+	TopLogprobs         *int           `json:"top_logprobs,omitempty"`
+	ResponseFormat      any            `json:"response_format,omitempty"`
+	User                *string        `json:"user,omitempty"`
+	ServiceTier         *string        `json:"service_tier,omitempty"`
+	ReasoningEffort     *string        `json:"reasoning_effort,omitempty"`
+	Verbosity           *string        `json:"verbosity,omitempty"`
 }
 
 // ChatCompletionResponse mirrors the OpenAI response schema.
 type ChatCompletionResponse struct {
-	ID      string                 `json:"id"`
-	Object  string                 `json:"object"`
-	Created int64                  `json:"created"`
-	Model   string                 `json:"model"`
-	Choices []ChatCompletionChoice `json:"choices"`
-	Usage   ChatCompletionUsage    `json:"usage"`
+	ID                string                 `json:"id"`
+	Object            string                 `json:"object"`
+	Created           int64                  `json:"created"`
+	Model             string                 `json:"model"`
+	Choices           []ChatCompletionChoice `json:"choices"`
+	Usage             ChatCompletionUsage    `json:"usage"`
+	SystemFingerprint *string                `json:"system_fingerprint,omitempty"`
+	ServiceTier       *string                `json:"service_tier,omitempty"`
 }
 
 type ChatCompletionChoice struct {
 	Index        int         `json:"index"`
 	Message      ChatMessage `json:"message"`
 	FinishReason string      `json:"finish_reason"`
+	Logprobs     any         `json:"logprobs,omitempty"`
 }
 
 type ChatCompletionUsage struct {
@@ -329,12 +364,14 @@ type StreamChunk struct {
 	Created int64               `json:"created"`
 	Model   string              `json:"model"`
 	Choices []StreamChunkChoice `json:"choices"`
+	Usage   *ChatCompletionUsage `json:"usage,omitempty"`
 }
 
 type StreamChunkChoice struct {
 	Index        int         `json:"index"`
 	Delta        ChatMessage `json:"delta"`
 	FinishReason *string     `json:"finish_reason"`
+	Logprobs     any         `json:"logprobs,omitempty"`
 }
 
 // ─────────────────────────────────────────────
